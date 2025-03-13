@@ -56,13 +56,9 @@ def parse_filename(filename):
             continue
             
         # 如果包含特殊标记如"〔法〕"，很可能是作者
-        if re.search(r'〔[^〕]+〕', possible_author):
-            # 提取国籍标记后的实际作者名
-            author_parts = re.search(r'〔[^〕]+〕(.*)', possible_author)
-            if author_parts:
-                author = author_parts.group(1).strip()
-            else:
-                author = possible_author
+        if re.search(r'〔[^〕]+〕|\([^)]+\)|\[[^\]]+\]|（[^）]+）', possible_author):
+            # 直接去除国籍标记，保留作者名
+            author = re.sub(r'〔[^〕]+〕|\([^)]+\)|\[[^\]]+\]|（[^）]+）', '', possible_author).strip()
             break
             
         # 否则，如果长度合适，可能是作者
@@ -108,8 +104,8 @@ def parse_filename(filename):
                 title = short_title_match.group(0).strip()
     
     if author:
-        # 清理作者名中的特殊字符
-        author = re.sub(r'\[[^\]]*\]|〔[^〕]*〕', '', author).strip()
+        # 清理作者名中的特殊字符和国籍标记
+        author = re.sub(r'\[[^\]]*\]|〔[^〕]*〕|\([^)]*\)|（[^）]*）|【[^】]*】', '', author).strip()
     
     # 最后一步：确保标题和作者没有前导和尾部的特殊字符
     if title:
@@ -436,7 +432,20 @@ def generate_nfo(book_info, save_path):
     
     # 添加其他信息
     xml_content += f'    <publisher>{safe_xml(book_info.get("publisher", ""))}</publisher>\n'
-    xml_content += f'    <artist>{safe_xml(book_info.get("author", ""))}</artist>\n'
+    
+    # 获取作者信息，优先使用authors字段
+    artist = ""
+    if book_info.get("authors") and len(book_info["authors"]) > 0:
+        # 使用第一个作者
+        artist = book_info["authors"][0]
+    else:
+        artist = book_info.get("author", "")
+        
+    # 清理作者名中的国籍标记
+    if artist:
+        artist = re.sub(r'[\[（\(【〔][^\]）\)】〕]*[\]）\)】〕]', '', artist).strip()
+        
+    xml_content += f'    <artist>{safe_xml(artist)}</artist>\n'
     
     # 添加简介，优先使用完整简介
     intro = book_info.get("full_intro") or book_info.get("intro") or ""
@@ -470,15 +479,31 @@ def rename_books():
                 meta_author, meta_title = extract_pdf_metadata(file_path)
                 if meta_author: author = meta_author
                 if meta_title: title = meta_title
-            elif ext.lower() in ["epub", "mobi", "awz3"]:
+            elif ext.lower() in ["epub", "mobi", "azw3","azw"]:
                 meta_author, meta_title = extract_ebook_metadata(file_path)
                 if meta_author: author = meta_author
                 if meta_title: title = meta_title
         douban_info = None
-        if not title or not year:
+        # 无论是否有标题或作者，都尝试从豆瓣获取信息
+        if title:
             douban_info = search_douban(title, author)
             if douban_info:
-                author, title, year = douban_info["author"], douban_info["title"], douban_info["year"]
+                # 优先使用豆瓣的作者信息
+                title = douban_info["title"]
+                year = douban_info.get("year")
+                
+                # 优先使用豆瓣详情页的authors字段
+                if douban_info.get("authors") and len(douban_info["authors"]) > 0:
+                    author = douban_info["authors"][0]
+                else:
+                    author = douban_info["author"]
+                
+                # 清理作者名中的国籍标记
+                if author:
+                    # 移除如〔法〕、（美）等国籍标记
+                    author = re.sub(r'[\[（\(【〔][^\]）\)】〕]*[\]）\)】〕]', '', author).strip()
+                    # 移除可能的前导和尾部特殊字符
+                    author = re.sub(r'^[^\u4e00-\u9fa5a-zA-Z0-9]+|[^\u4e00-\u9fa5a-zA-Z0-9]+$', '', author).strip()
 
         # 如果标题或作者为空，请求用户输入
         if not title:

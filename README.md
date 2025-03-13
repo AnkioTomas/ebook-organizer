@@ -76,9 +76,9 @@ books/
 该工具能够处理各种复杂的文件名格式，包括但不限于：
 
 - 带有书名号的文件名：`《苏东坡传》 (林语堂) (Z-Library).epub`
-- 带有国籍标记的作者名：`人都是要死的 (〔法〕西蒙娜·德·波伏瓦) (Z-Library).epub`
-- 带有特殊符号的文件名：`【精排】鬼吹灯8部全集图文版 (天下霸唱 [天下霸唱]) (Z-Library).epub`
-- 带有长描述的文件名：`人间草木（20世纪文学大家、生活家汪曾祺散文集，水一样的文字写妙趣生活） (汪曾祺) (Z-Library).mobi`
+- 带有译者信息的文件名：`人都是要死的 (西蒙娜·德·波伏瓦) (Z-Library).epub`
+- 带有特殊符号的文件名：`【精排】鬼吹灯8部全集图文版 (天下霸唱) (Z-Library).epub`
+- 带有长描述的文件名：`人间草木（文学散文集，水一样的文字写妙趣生活） (汪曾祺) (Z-Library).mobi`
 
 ## 📝 配置选项
 
@@ -123,10 +123,9 @@ NEW_NAME_PATTERN = "{author} - {title} ({year})"  # 文件夹命名格式
 - GitHub Issues: [ebook-organizer](https://github.com/AnkioTomas/ebook-organizer/issues)
 - Email: ankio@ankio.net
 
-
 ## 🤖 开发说明
 
-本项目约90%的代码由AI生成并经过人工审核和优化。
+本项目是AI辅助开发的实践案例，代码经过人工审核和优化，展示了现代软件开发中人机协作的效率和可能性。
 
 ---
 
