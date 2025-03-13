@@ -18,7 +18,7 @@ DEFAULT_HEADERS = {
     'Accept-Encoding': 'gzip, deflate',
     'Referer': "https://book.douban.com/"
 }
-SUPPORTED_FORMATS = ['pdf', 'epub', 'mobi', 'txt', 'awz3']
+SUPPORTED_FORMATS = ['pdf', 'epub', 'mobi', 'txt', 'azw3','azw']
 
 
 # === 解析文件名 ===
