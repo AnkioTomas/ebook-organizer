@@ -147,10 +147,10 @@ def extract_ebook_metadata(file_path):
 
 # === 从豆瓣获取书籍信息 ===
 def search_douban(query, expected_author=None, fetch_detail=True):
-    """在豆瓣搜索书籍，返回第一个匹配的书籍信息（确保作者匹配）
+    """在豆瓣搜索书籍，返回第一个匹配的书籍信息
     Args:
         query: 搜索关键词
-        expected_author: 期望的作者名（可选）
+        expected_author: 已废弃参数，保留是为了兼容性
         fetch_detail: 是否获取详情页信息（可选，默认True）
     """
     params = {"cat": "1001", "q": query}
@@ -230,10 +230,6 @@ def search_douban(query, expected_author=None, fetch_detail=True):
             # 获取简介
             intro = result.select_one('.content p')
             intro = intro.get_text(strip=True) if intro else None
-
-            # 如果指定了期望作者且不匹配，则继续查找
-            if expected_author and expected_author.lower() not in author.lower():
-                continue
 
             book_info = {
                 "title": title,
@@ -486,7 +482,7 @@ def rename_books():
         douban_info = None
         # 无论是否有标题或作者，都尝试从豆瓣获取信息
         if title:
-            douban_info = search_douban(title, author)
+            douban_info = search_douban(title)
             if douban_info:
                 # 优先使用豆瓣的作者信息
                 title = douban_info["title"]
