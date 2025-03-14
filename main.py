@@ -1,6 +1,8 @@
 import json
 import os
 import re
+import time
+import random
 from xml.sax.saxutils import escape
 
 import PyPDF2
@@ -11,15 +13,101 @@ from lxml import etree
 
 # === 目录 & 配置 ===
 BOOKS_DIR = "./books"  # 书籍目录
+CONFIG_FILE = "./douban_config.json"  # 配置文件
 NEW_NAME_PATTERN = "{author} - {title} ({year})"  # 文件夹命名格式
 DOUBAN_SEARCH_URL = "https://www.douban.com/search"
-DEFAULT_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-    'Accept-Encoding': 'gzip, deflate',
-    'Referer': "https://book.douban.com/"
+# 随机User-Agent列表
+USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Safari/605.1.15',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:90.0) Gecko/20100101 Firefox/90.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36'
+]
+# 请求配置
+REQUEST_CONFIG = {
+    'timeout': 10,  # 请求超时时间（秒）
+    'max_retries': 3,  # 最大重试次数
+    'retry_delay': [2, 5],  # 重试延迟范围（秒）
+    'request_delay': [1, 3],  # 请求间隔范围（秒）
+    'proxy': None  # 代理设置，格式如 {'http': 'http://127.0.0.1:7890', 'https': 'http://127.0.0.1:7890'}
 }
 SUPPORTED_FORMATS = ['pdf', 'epub', 'mobi', 'txt', 'azw3','azw']
 
+# === 请求工具函数 ===
+def get_random_headers():
+    """获取随机User-Agent的请求头"""
+    return {
+        'User-Agent': random.choice(USER_AGENTS),
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2',
+        'Accept-Encoding': 'gzip, deflate',
+        'Connection': 'keep-alive',
+        'Referer': 'https://book.douban.com/',
+        'Upgrade-Insecure-Requests': '1',
+        'Cache-Control': 'max-age=0'
+    }
+
+def safe_request(url, method='get', params=None, retry_count=0, **kwargs):
+    """安全的请求函数，带有重试、延迟和异常处理"""
+    # 合并默认请求头和自定义请求头
+    headers = get_random_headers()
+    if 'headers' in kwargs:
+        headers.update(kwargs.pop('headers'))
+    
+    # 添加代理
+    proxies = REQUEST_CONFIG['proxy']
+    
+    try:
+        # 请求前随机延迟，避免频繁请求
+        if retry_count > 0 or random.random() < 0.8:  # 80%概率延迟
+            delay = random.uniform(*REQUEST_CONFIG['request_delay'])
+            time.sleep(delay)
+        
+        # 发起请求
+        if method.lower() == 'get':
+            response = requests.get(
+                url, 
+                headers=headers, 
+                params=params, 
+                proxies=proxies,
+                timeout=REQUEST_CONFIG['timeout'],
+                **kwargs
+            )
+        else:
+            response = requests.post(
+                url, 
+                headers=headers, 
+                data=params, 
+                proxies=proxies,
+                timeout=REQUEST_CONFIG['timeout'],
+                **kwargs
+            )
+        
+        # 检查响应状态
+        if response.status_code == 200:
+            return response
+        elif response.status_code == 403 or response.status_code == 429:
+            print(f"⚠️ 请求被限制 (状态码: {response.status_code})，等待后重试...")
+            retry_delay = random.uniform(*REQUEST_CONFIG['retry_delay']) * (retry_count + 1)
+            time.sleep(retry_delay)
+        else:
+            print(f"⚠️ 请求失败 (状态码: {response.status_code})")
+            
+    except requests.exceptions.Timeout:
+        print("⚠️ 请求超时")
+    except requests.exceptions.ConnectionError:
+        print("⚠️ 连接错误")
+    except Exception as e:
+        print(f"⚠️ 请求异常: {e}")
+    
+    # 重试逻辑
+    if retry_count < REQUEST_CONFIG['max_retries']:
+        print(f"🔄 第 {retry_count + 1} 次重试...")
+        return safe_request(url, method, params, retry_count + 1, **kwargs)
+    else:
+        print("❌ 达到最大重试次数，请求失败")
+        return None
 
 # === 解析文件名 ===
 def parse_filename(filename):
@@ -154,10 +242,10 @@ def search_douban(query, expected_author=None, fetch_detail=True):
         fetch_detail: 是否获取详情页信息（可选，默认True）
     """
     params = {"cat": "1001", "q": query}
-    res = requests.get(DOUBAN_SEARCH_URL, params=params, headers=DEFAULT_HEADERS)
-
-    if res.status_code != 200:
-        print(f"❌ 豆瓣搜索失败: {res.status_code}")
+    res = safe_request(DOUBAN_SEARCH_URL, params=params)
+    
+    if not res:
+        print(f"❌ 豆瓣搜索失败")
         return None
 
     soup = BeautifulSoup(res.content, 'html.parser')
@@ -263,8 +351,8 @@ def search_douban(query, expected_author=None, fetch_detail=True):
 def fetch_douban_book_info(book_url):
     """解析豆瓣书籍详情页，返回补充信息"""
     try:
-        res = requests.get(book_url, headers=DEFAULT_HEADERS)
-        if res.status_code != 200:
+        res = safe_request(book_url)
+        if not res:
             return None
 
         soup = BeautifulSoup(res.content, 'html.parser')
@@ -376,15 +464,11 @@ def fetch_douban_book_info(book_url):
 def download_cover(url, save_path):
     """下载豆瓣封面"""
     try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2',
-            'Accept-Encoding': 'gzip, deflate',
-            'Connection': 'keep-alive',
-            'Referer': 'https://book.douban.com/'
-        }
-        res = requests.get(url, headers=headers)
+        res = safe_request(url)
+        if not res:
+            print("❌ 下载封面失败")
+            return
+            
         with open(save_path, "wb") as f:
             f.write(res.content)
     except Exception as e:
@@ -548,6 +632,53 @@ def rename_books():
         print(f"✅ 文件处理完成: {title}\n")
 
 
+# === 配置管理 ===
+def save_config():
+    """保存当前配置到文件"""
+    config = {
+        'proxy': REQUEST_CONFIG['proxy'],
+        'request_delay': REQUEST_CONFIG['request_delay'],
+        'retry_delay': REQUEST_CONFIG['retry_delay'],
+        'timeout': REQUEST_CONFIG['timeout'],
+        'max_retries': REQUEST_CONFIG['max_retries']
+    }
+    try:
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+        print(f"✅ 配置已保存到 {CONFIG_FILE}")
+    except Exception as e:
+        print(f"⚠️ 保存配置失败: {e}")
+
+def load_config():
+    """从文件加载配置"""
+    if not os.path.exists(CONFIG_FILE):
+        return False
+        
+    try:
+        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+            
+        # 更新配置
+        for key, value in config.items():
+            if key in REQUEST_CONFIG:
+                REQUEST_CONFIG[key] = value
+                
+        print(f"✅ 已加载配置: {CONFIG_FILE}")
+        
+        # 显示当前配置
+        if REQUEST_CONFIG['proxy']:
+            proxy_info = REQUEST_CONFIG['proxy'].get('http', 'None')
+            print(f"  - 代理: {proxy_info}")
+        print(f"  - 请求延迟: {REQUEST_CONFIG['request_delay'][0]}-{REQUEST_CONFIG['request_delay'][1]}秒")
+        print(f"  - 超时: {REQUEST_CONFIG['timeout']}秒")
+        print(f"  - 最大重试: {REQUEST_CONFIG['max_retries']}次")
+        
+        return True
+    except Exception as e:
+        print(f"⚠️ 加载配置失败: {e}")
+        return False
+
+
 if __name__ == "__main__":
     print("=" * 50)
     print("📚 电子书文件整理工具")
@@ -557,6 +688,49 @@ if __name__ == "__main__":
     print("支持格式: " + ", ".join(SUPPORTED_FORMATS))
     print("=" * 50)
     
+    # 加载配置
+    has_config = load_config()
+    
+    # 配置网络设置
+    print("\n=== 网络设置 ===")
+    if has_config:
+        use_saved = input("检测到已保存的配置，是否使用? (y/n, 默认: y): ").strip().lower() != 'n'
+        if not use_saved:
+            has_config = False
+    
+    if not has_config:
+        print("(可选) 配置代理和请求参数，避免IP封锁")
+        
+        use_proxy = input("是否使用代理? (y/n, 默认: n): ").strip().lower() == 'y'
+        if use_proxy:
+            proxy_host = input("请输入代理地址 (例如: 127.0.0.1): ").strip()
+            proxy_port = input("请输入代理端口 (例如: 7890): ").strip()
+            if proxy_host and proxy_port:
+                proxy_url = f"http://{proxy_host}:{proxy_port}"
+                REQUEST_CONFIG['proxy'] = {
+                    'http': proxy_url,
+                    'https': proxy_url
+                }
+                print(f"✅ 已设置代理: {proxy_url}")
+        
+        # 配置请求延迟
+        custom_delay = input("是否自定义请求延迟? (y/n, 默认: n): ").strip().lower() == 'y'
+        if custom_delay:
+            try:
+                min_delay = float(input("最小延迟秒数 (默认: 1): ").strip() or "1")
+                max_delay = float(input("最大延迟秒数 (默认: 3): ").strip() or "3")
+                if min_delay > 0 and max_delay >= min_delay:
+                    REQUEST_CONFIG['request_delay'] = [min_delay, max_delay]
+                    print(f"✅ 已设置请求延迟: {min_delay}-{max_delay}秒")
+            except ValueError:
+                print("⚠️ 输入无效，使用默认延迟设置")
+        
+        # 保存配置
+        save_config_choice = input("是否保存当前配置? (y/n, 默认: y): ").strip().lower() != 'n'
+        if save_config_choice:
+            save_config()
+    
+    print("\n开始处理书籍文件...")
     rename_books()
     
     print("\n✅ 处理完成！")
