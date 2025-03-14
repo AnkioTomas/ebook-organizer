@@ -337,7 +337,7 @@ def search_douban(query, expected_author=None, fetch_detail=True, min_similarity
     """在豆瓣搜索书籍，返回匹配度最高的书籍信息
     Args:
         query: 搜索关键词
-        expected_author: 已废弃参数，保留是为了兼容性
+        expected_author: 预期的作者名（可选，用于比较）
         fetch_detail: 是否获取详情页信息（可选，默认True）
         min_similarity: 最小标题相似度（可选，默认0.6）
     """
@@ -461,7 +461,8 @@ def search_douban(query, expected_author=None, fetch_detail=True, min_similarity
                 "intro": intro,
                 "url": real_book_url,
                 "douban_id": subject_id,
-                "similarity": similarity
+                "similarity": similarity,
+                "index": index + 1  # 保存结果的序号，用于用户选择
             }
             
             # 将结果添加到匹配列表
@@ -476,10 +477,53 @@ def search_douban(query, expected_author=None, fetch_detail=True, min_similarity
         print_warning("没有找到匹配的书籍")
         return None
         
-    # 按相似度排序，取最匹配的结果
+    # 按相似度排序
     matched_results.sort(key=lambda x: x["similarity"], reverse=True)
-    best_match = matched_results[0]
-    print_info(f"最佳匹配: '{best_match['title']}' (相似度: {best_match['similarity']:.2f})")
+    
+    # 获取最高相似度
+    highest_similarity = matched_results[0]["similarity"]
+    
+    # 筛选出相似度相同的最高匹配结果
+    top_matches = [r for r in matched_results if abs(r["similarity"] - highest_similarity) < 0.01]
+    
+    print_info(f"找到 {len(top_matches)} 个最佳匹配结果 (相似度: {highest_similarity:.2f})")
+    
+    # 如果只有一个最佳匹配，直接返回
+    if len(top_matches) == 1:
+        best_match = top_matches[0]
+        print_info(f"最佳匹配: '{best_match['title']}' (相似度: {best_match['similarity']:.2f})")
+    else:
+        # 如果有多个匹配且提供了预期作者，尝试匹配作者
+        if expected_author and len(top_matches) > 1:
+            # 清理预期作者名
+            expected_author = re.sub(r'[\[（\(【〔][^\]）\)】〕]*[\]）\)】〕]', '', expected_author).strip()
+            expected_author = to_simplified(expected_author)
+            
+            # 尝试找到作者匹配的结果
+            author_matches = []
+            for match in top_matches:
+                # 清理作者名以便比较
+                clean_author = re.sub(r'[\[（\(【〔][^\]）\)】〕]*[\]）\)】〕]', '', match["author"]).strip()
+                
+                # 计算作者相似度
+                author_similarity = difflib.SequenceMatcher(None, expected_author.lower(), clean_author.lower()).ratio()
+                match["author_similarity"] = author_similarity
+                
+                # 如果作者相似度高，加入匹配列表
+                if author_similarity > 0.7:
+                    author_matches.append(match)
+            
+            # 如果找到作者匹配的结果，按作者相似度排序
+            if author_matches:
+                author_matches.sort(key=lambda x: x["author_similarity"], reverse=True)
+                best_match = author_matches[0]
+                print_info(f"根据作者匹配选择: '{best_match['title']}' 作者: '{best_match['author']}' (作者相似度: {best_match['author_similarity']:.2f})")
+            else:
+                # 如果没有作者匹配，让用户选择
+                best_match = user_select_match(top_matches)
+        else:
+            # 如果没有预期作者或只有一个匹配，让用户选择
+            best_match = user_select_match(top_matches)
     
     # 获取详情页信息（ISBN等）
     if fetch_detail and best_match["url"]:
@@ -489,6 +533,36 @@ def search_douban(query, expected_author=None, fetch_detail=True, min_similarity
             best_match.update(detail_info)
     
     return best_match
+
+def user_select_match(matches):
+    """让用户从多个匹配结果中选择一个"""
+    print("\n" + colorama.Fore.CYAN + "=== 找到多个匹配结果，请选择 ===" + colorama.Style.RESET_ALL)
+    
+    for i, match in enumerate(matches):
+        print(f"{colorama.Fore.YELLOW}[{i+1}] {colorama.Fore.GREEN}{match['title']}{colorama.Style.RESET_ALL}")
+        print(f"   作者: {colorama.Fore.WHITE}{match['author']}{colorama.Style.RESET_ALL}")
+        print(f"   出版社: {colorama.Fore.WHITE}{match['publisher'] or '未知'}{colorama.Style.RESET_ALL}")
+        print(f"   年份: {colorama.Fore.WHITE}{match['year'] or '未知'}{colorama.Style.RESET_ALL}")
+        print(f"   评分: {colorama.Fore.WHITE}{match['rating'] or '未知'} ({match['rating_people'] or '0'}人评价){colorama.Style.RESET_ALL}")
+        if match.get('intro'):
+            # 截取简介的前50个字符
+            short_intro = match['intro'][:50] + ('...' if len(match['intro']) > 50 else '')
+            print(f"   简介: {colorama.Fore.WHITE}{short_intro}{colorama.Style.RESET_ALL}")
+        print()
+    
+    # 获取用户选择
+    while True:
+        try:
+            choice = input(f"{colorama.Fore.YELLOW}请输入选择的序号 (1-{len(matches)}): {colorama.Style.RESET_ALL}")
+            choice_idx = int(choice) - 1
+            if 0 <= choice_idx < len(matches):
+                selected = matches[choice_idx]
+                print_info(f"已选择: '{selected['title']}' 作者: '{selected['author']}'")
+                return selected
+            else:
+                print_error(f"无效的选择，请输入1-{len(matches)}之间的数字")
+        except ValueError:
+            print_error("请输入有效的数字")
 
 
 # === 解析豆瓣书籍详情页 ===
@@ -767,7 +841,8 @@ def rename_books():
         douban_info = None
         if title:
             print_info(f"尝试从豆瓣获取信息: {title}")
-            douban_info = search_douban(title)
+            # 传递预期的作者信息
+            douban_info = search_douban(title, expected_author=author)
             if douban_info:
                 print_info(f"成功获取豆瓣信息: {douban_info['title']}")
                 # 优先使用豆瓣的作者信息
