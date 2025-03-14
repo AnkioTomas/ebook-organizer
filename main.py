@@ -822,18 +822,18 @@ def rename_books():
             print_info("尝试从文件元数据获取信息")
             if ext.lower() == "pdf":
                 meta_author, meta_title = extract_pdf_metadata(file_path)
-                if meta_author: 
+                if not author and meta_author: 
                     author = meta_author
                     print_info(f"从PDF元数据获取作者: {author}")
-                if meta_title: 
+                if not title and meta_title: 
                     title = meta_title
                     print_info(f"从PDF元数据获取标题: {title}")
             elif ext.lower() in ["epub", "mobi", "azw3","azw"]:
                 meta_author, meta_title = extract_ebook_metadata(file_path)
-                if meta_author: 
+                if not author and meta_author: 
                     author = meta_author
                     print_info(f"从电子书元数据获取作者: {author}")
-                if meta_title: 
+                if not title and meta_title: 
                     title = meta_title
                     print_info(f"从电子书元数据获取标题: {title}")
         
