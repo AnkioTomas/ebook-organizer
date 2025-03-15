@@ -12,9 +12,19 @@ import ebookmeta  # 处理 EPUB/MOBI/AWZ3 格式的元数据
 import requests
 from bs4 import BeautifulSoup
 import opencc  # 用于繁体转简体
+from webdav3.client import Client  # WebDAV客户端
 
 # 初始化繁体转简体转换器
 converter = opencc.OpenCC('t2s')
+
+# WebDAV配置
+WEBDAV_CONFIG = {
+    'enabled': False,  # 是否启用WebDAV
+    'hostname': '',    # WebDAV服务器地址
+    'username': '',    # 用户名
+    'password': '',    # 密码
+    'root_path': '/books'  # 远程根目录
+}
 
 # 繁体转简体函数
 def to_simplified(text):
@@ -924,6 +934,18 @@ def rename_books():
             
             print_info(f"文件处理完成: {title}")
             print(f"{colorama.Fore.GREEN}✅ 文件处理完成: {title}\n{colorama.Style.RESET_ALL}")
+
+            # 在文件处理完成后，如果启用了WebDAV，上传并清理
+            if WEBDAV_CONFIG['enabled']:
+                print_info("正在上传到WebDAV...")
+                if upload_to_webdav(folder_path, folder_name):
+                    print(f"{colorama.Fore.GREEN}✅ WebDAV上传成功{colorama.Style.RESET_ALL}")
+                    # 询问是否删除本地文件
+                    if input(f"{colorama.Fore.YELLOW}是否删除本地文件? (y/n, 默认: y): {colorama.Style.RESET_ALL}").strip().lower() != 'n':
+                        clean_local_folder(folder_path)
+                        print(f"{colorama.Fore.GREEN}✅ 本地文件已清理{colorama.Style.RESET_ALL}")
+                else:
+                    print(f"{colorama.Fore.RED}❌ WebDAV上传失败，保留本地文件{colorama.Style.RESET_ALL}")
         except Exception as e:
             print_error(f"处理文件时出错: {e}")
             print(f"{colorama.Fore.RED}❌ 处理文件时出错: {e}{colorama.Style.RESET_ALL}")
@@ -937,7 +959,8 @@ def save_config():
         'request_delay': REQUEST_CONFIG['request_delay'],
         'retry_delay': REQUEST_CONFIG['retry_delay'],
         'timeout': REQUEST_CONFIG['timeout'],
-        'max_retries': REQUEST_CONFIG['max_retries']
+        'max_retries': REQUEST_CONFIG['max_retries'],
+        'webdav': WEBDAV_CONFIG  # 添加WebDAV配置
     }
     try:
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
@@ -960,6 +983,8 @@ def load_config():
         for key, value in config.items():
             if key in REQUEST_CONFIG:
                 REQUEST_CONFIG[key] = value
+            elif key == 'webdav':
+                WEBDAV_CONFIG.update(value)
                 
         print_info(f"已加载配置: {CONFIG_FILE}")
         
@@ -970,11 +995,93 @@ def load_config():
         print_info(f"  - 请求延迟: {REQUEST_CONFIG['request_delay'][0]}-{REQUEST_CONFIG['request_delay'][1]}秒")
         print_info(f"  - 超时: {REQUEST_CONFIG['timeout']}秒")
         print_info(f"  - 最大重试: {REQUEST_CONFIG['max_retries']}次")
+        if WEBDAV_CONFIG['enabled']:
+            print_info(f"  - WebDAV已启用: {WEBDAV_CONFIG['hostname']}")
         
         return True
     except Exception as e:
         print_error(f"加载配置失败: {e}")
         return False
+
+# === WebDAV功能 ===
+def init_webdav_client():
+    """初始化WebDAV客户端"""
+    if not WEBDAV_CONFIG['enabled']:
+        return None
+        
+    options = {
+        'webdav_hostname': WEBDAV_CONFIG['hostname'],
+        'webdav_login': WEBDAV_CONFIG['username'],
+        'webdav_password': WEBDAV_CONFIG['password'],
+        'disable_check': True
+    }
+    
+    try:
+        client = Client(options)
+        # 测试连接
+        client.check()
+        print_info("WebDAV连接测试成功")
+        return client
+    except Exception as e:
+        print_error(f"WebDAV连接失败: {e}")
+        return None
+
+def upload_to_webdav(local_folder, folder_name):
+    """上传文件夹到WebDAV服务器
+    Args:
+        local_folder: 本地文件夹路径
+        folder_name: 文件夹名称
+    Returns:
+        bool: 是否上传成功
+    """
+    if not WEBDAV_CONFIG['enabled']:
+        return False
+        
+    client = init_webdav_client()
+    if not client:
+        return False
+        
+    try:
+        # 构建远程路径
+        remote_folder = os.path.join(WEBDAV_CONFIG['root_path'], folder_name).replace('\\', '/')
+        
+        print_info(f"开始上传到WebDAV: {remote_folder}")
+        
+        # 确保远程目录存在
+        if not client.check(remote_folder):
+            client.mkdir(remote_folder)
+        
+        # 上传文件夹中的所有文件
+        for file in os.listdir(local_folder):
+            local_file = os.path.join(local_folder, file)
+            remote_file = f"{remote_folder}/{file}"
+            
+            if os.path.isfile(local_file):
+                print_info(f"上传文件: {file}")
+                client.upload_file(remote_file, local_file)
+        
+        print_info(f"文件夹上传完成: {folder_name}")
+        return True
+        
+    except Exception as e:
+        print_error(f"上传到WebDAV失败: {e}")
+        return False
+
+def clean_local_folder(folder_path):
+    """清理本地文件夹
+    Args:
+        folder_path: 要清理的文件夹路径
+    """
+    try:
+        for file in os.listdir(folder_path):
+            file_path = os.path.join(folder_path, file)
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+                print_debug(f"删除文件: {file}")
+        os.rmdir(folder_path)
+        print_info(f"清理本地文件夹: {folder_path}")
+    except Exception as e:
+        print_error(f"清理本地文件夹失败: {e}")
 
 
 if __name__ == "__main__":
@@ -1033,6 +1140,23 @@ if __name__ == "__main__":
             except ValueError:
                 print_warning("输入无效，使用默认延迟设置")
                 print(f"{colorama.Fore.RED}⚠️ 输入无效，使用默认延迟设置{colorama.Style.RESET_ALL}")
+        
+        # 配置WebDAV
+        print("\n" + colorama.Fore.CYAN + "=== WebDAV设置 ===" + colorama.Style.RESET_ALL)
+        use_webdav = input(f"{colorama.Fore.YELLOW}是否启用WebDAV? (y/n, 默认: n): {colorama.Style.RESET_ALL}").strip().lower() == 'y'
+        if use_webdav:
+            WEBDAV_CONFIG['enabled'] = True
+            WEBDAV_CONFIG['hostname'] = input(f"{colorama.Fore.YELLOW}请输入WebDAV服务器地址: {colorama.Style.RESET_ALL}").strip()
+            WEBDAV_CONFIG['username'] = input(f"{colorama.Fore.YELLOW}请输入用户名: {colorama.Style.RESET_ALL}").strip()
+            WEBDAV_CONFIG['password'] = input(f"{colorama.Fore.YELLOW}请输入密码: {colorama.Style.RESET_ALL}").strip()
+            WEBDAV_CONFIG['root_path'] = input(f"{colorama.Fore.YELLOW}请输入远程根目录 (默认: /books): {colorama.Style.RESET_ALL}").strip() or '/books'
+            
+            # 测试WebDAV连接
+            if init_webdav_client():
+                print(f"{colorama.Fore.GREEN}✅ WebDAV连接测试成功{colorama.Style.RESET_ALL}")
+            else:
+                print(f"{colorama.Fore.RED}❌ WebDAV连接测试失败{colorama.Style.RESET_ALL}")
+                WEBDAV_CONFIG['enabled'] = False
         
         # 保存配置
         save_config_choice = input(f"{colorama.Fore.YELLOW}是否保存当前配置? (y/n, 默认: y): {colorama.Style.RESET_ALL}").strip().lower() != 'n'
