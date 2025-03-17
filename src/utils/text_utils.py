@@ -30,6 +30,33 @@ def safe_xml(text):
     text = to_simplified(str(text))
     return escape(text)
 
+def sanitize_filename(filename):
+    """清理文件名中Windows不支持的特殊字符
+    Args:
+        filename: 原始文件名
+    Returns:
+        清理后的文件名
+    """
+    if not filename:
+        return ""
+    
+    # Windows不允许的字符: \ / : * ? " < > |
+    invalid_chars = r'[\\/:*?"<>|]'
+    # 替换为下划线
+    sanitized = re.sub(invalid_chars, '', filename)
+    
+    # 处理其他可能导致问题的字符，如引号
+    sanitized = sanitized.replace('"', "'")
+    
+    # 确保文件名不以点或空格结尾（Windows不允许）
+    sanitized = sanitized.rstrip('. ')
+    
+    # 如果文件名为空，提供默认名称
+    if not sanitized or sanitized.isspace():
+        sanitized = "未命名"
+        
+    return sanitized
+
 def calculate_title_similarity(title1, title2):
     """计算两个标题的相似度
     Args:

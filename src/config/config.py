@@ -143,10 +143,16 @@ def generate_folder_name(book_info):
     Returns:
         str: 生成的文件夹名称
     """
+    from src.utils.text_utils import sanitize_filename
+    
     title = book_info["title"]
     author = book_info["author"]
     year = book_info.get("year")
     
     if year:
-        return NEW_NAME_PATTERN.format(author=author, title=title, year=year)
-    return f"{author} - {title}" 
+        folder_name = NEW_NAME_PATTERN.format(author=author, title=title, year=year)
+    else:
+        folder_name = f"{author} - {title}"
+        
+    # 清理文件夹名中的非法字符
+    return sanitize_filename(folder_name) 

@@ -106,6 +106,8 @@ def create_book_folder(book_info, original_file_path):
     Returns:
         (folder_path, new_file_path) 元组
     """
+    from src.utils.text_utils import sanitize_filename
+    
     # 获取必要信息
     title = book_info["title"]
     ext = os.path.splitext(original_file_path)[1].lstrip(".")
@@ -116,7 +118,10 @@ def create_book_folder(book_info, original_file_path):
     
     # 创建文件夹
     folder_path = os.path.join(BOOKS_DIR, folder_name)
-    new_file_path = os.path.join(folder_path, f"{title}.{ext}")
+    
+    # 清理文件名
+    safe_title = sanitize_filename(title)
+    new_file_path = os.path.join(folder_path, f"{safe_title}.{ext}")
     
     try:
         os.makedirs(folder_path, exist_ok=True)

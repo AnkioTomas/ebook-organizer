@@ -16,6 +16,7 @@ from src.services.douban import search_douban
 from src.services.file_service import download_cover, generate_nfo, create_book_folder
 from src.services.webdav import upload_to_webdav, clean_local_folder
 from src.services.ai_service import ai_extract_title_author, ai_confirm_rename
+from src.utils.text_utils import sanitize_filename
 
 def rename_books():
     """遍历目录，重命名书籍文件，并整理到独立文件夹"""
@@ -169,11 +170,14 @@ def rename_books():
             if not folder_path or not new_file_path:
                 continue
 
+            # 获取安全的文件名（与create_book_folder中使用相同的处理方式）
+            safe_title = sanitize_filename(title)
+
             if douban_info and douban_info.get("cover_url"):
-                cover_path = os.path.join(folder_path, f"{title}.jpg")
+                cover_path = os.path.join(folder_path, f"{safe_title}.jpg")
                 download_cover(douban_info["cover_url"], cover_path)
 
-            nfo_path = os.path.join(folder_path, f"{title}.nfo")
+            nfo_path = os.path.join(folder_path, f"{safe_title}.nfo")
             generate_nfo(douban_info, nfo_path)
             
             print_success(f"文件处理完成: {title}")
